@@ -1,28 +1,3 @@
-# jsonl_marble_fuzzy_stats.py
-"""
-Dataset MARBLE que genera features fuzzy + estadísticas a partir de las ventanas crudas,
-reutilizando el procesamiento de Z.UWB (fuzzy logic + stats).
-
-Uso típico:
-
-    from src.data.jsonl_marble_fuzzy_stats import JsonlMarbleFuzzyStats
-
-    ds_tr = JsonlMarbleFuzzyStats(
-        raw_path="data/marble/train_raw.jsonl",
-        channels=[...],      # mismos canales que en tu cfg
-        fs=fs,
-        duration=duration,
-    )
-
-    sample = ds_tr[0]
-    x = sample["X"]   # tensor (D,) con fuzzy+stats
-    y = sample["y"]   # label int
-
-Luego puedes hacer:
-    MLP( x ) -> proyector -> LLaMA
-
-No hay Chronos en este pipeline.
-"""
 
 from __future__ import annotations
 from pathlib import Path

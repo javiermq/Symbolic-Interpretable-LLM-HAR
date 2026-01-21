@@ -407,13 +407,11 @@ def svm_explain_one_zscore(
     W = svm.coef_          # (C, D)
     b = svm.intercept_     # (C,)
 
-    # z-score SOLO para ranking
+
     x_norm = (x_1d - mu) / sigma
 
-    # contribuciones para clase predicha
     contrib_pred = W[pred] * x_norm
 
-    # contraste pred vs second
     contrib_diff = (W[pred] - W[second]) * x_norm
 
     def top_signed(arr, k):
@@ -597,10 +595,8 @@ def xgb_explain_one(
 ):
     booster = xgb_model.get_booster()
 
-    # asegurar nombres de features en el booster (opcional pero recomendable)
-    safe_names = [f"f{i}" for i in range(len(feature_names))]
 
-    # Asegura nombres seguros en booster
+    safe_names = [f"f{i}" for i in range(len(feature_names))]
     booster.feature_names = safe_names
 
     dmat = xgb_lib.DMatrix(
@@ -615,17 +611,15 @@ def xgb_explain_one(
     second = int(order[1]) if len(order) > 1 else pred
 
     # contribuciones tipo SHAP del booster
-    # multiclass suele devolver (1, C, D+1) o (C, D+1) según versión
     contrib = booster.predict(dmat, pred_contribs=True)
 
     contrib = np.asarray(contrib)
 
     # Normalizamos shapes:
-    # - si es (1, C, D+1) -> quitamos batch
+
     if contrib.ndim == 3 and contrib.shape[0] == 1:
         contrib = contrib[0]  # (C, D+1)
-    # - si es (C, D+1) ok
-    # - si es (1, D+1) (binario) -> lo tratamos como C=1
+
     if contrib.ndim == 2 and contrib.shape[0] == 1:
         contrib = contrib  # (1, D+1)
 

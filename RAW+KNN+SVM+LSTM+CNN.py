@@ -497,9 +497,9 @@ class OnlyLSTM(nn.Module):
         return logits
 
 
-model = OnlyLSTM(n_channels=n_channels, n_classes=num_classes).to(device)
+#model = OnlyLSTM(n_channels=n_channels, n_classes=num_classes).to(device)
 
-#model = CNNLSTM(n_channels=n_channels, n_classes=num_classes).to(device)
+model = CNNLSTM(n_channels=n_channels, n_classes=num_classes).to(device)
 counts = Counter(y_train.tolist())
 total = len(y_train)
 

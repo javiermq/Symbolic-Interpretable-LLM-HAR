@@ -15,8 +15,8 @@ WINDOW_SIZE_ROWS = 128
 THRESH_FEATURE = 0.5
 
 
-USE_QUANTIZE = True     # ⬅️ pon False si no quieres cuantizar
-Q_STEP = 0.05          # granularidad (0.25 → {0, 0.25, 0.5, 0.75, 1.0})
+USE_QUANTIZE = True     
+Q_STEP = 0.05          
 
 USE_QUANTIZE2=True
 Q_STEP2 = 0.01
@@ -193,8 +193,7 @@ test_records  = _read_jsonl(TEST_JSONL_PATH)
 
 # =========================
 # Convertimos a segmentos numéricos
-# =========================
-# asumimos que todos los 'window' tienen exactamente las mismas keys y mismo largo
+
 example_rec = train_records[0]
 example_win = example_rec["window"]
 
@@ -227,7 +226,6 @@ def window_to_array_generic(rec):
         arr = np.round(arr, decimals=2)
         return arr, sensor_cols
 
-    # --- Formato antiguo: dict {canal: [T]} ---
     if isinstance(win, dict):
         sensor_cols = list(win.keys())
         arr_cols = [np.asarray(win[c], dtype=float) for c in sensor_cols]
@@ -238,7 +236,7 @@ def window_to_array_generic(rec):
     raise ValueError("Formato de 'window' no reconocido.")
 
 
-# Detecta columnas y tamaño temporal
+
 example_arr, sensor_cols = window_to_array_generic(example_rec)
 T = example_arr.shape[0]
 WINDOW_SIZE_ROWS = T
@@ -248,14 +246,6 @@ print("[fuzzy] sensor_cols:", sensor_cols)
 
 
 def infer_channel_type(ch_name: str) -> str:
-    """
-    Devuelve el subtipo de canal.
-
-    - Si hay YAML (--sensor_cfg), se usa exclusivamente CHANNEL_TYPE_MAP
-      y se lanza error si el canal no está definido.
-    - Si NO hay YAML, se cae al comportamiento heurístico anterior.
-    """
-    # 1) Si tenemos YAML, usarlo SÍ o SÍ
     global CHANNEL_TYPE_MAP
     if CHANNEL_TYPE_MAP:
         if ch_name not in CHANNEL_TYPE_MAP:
@@ -265,14 +255,11 @@ def infer_channel_type(ch_name: str) -> str:
             )
         return CHANNEL_TYPE_MAP[ch_name]
 
-    # 2) Sin YAML: heurística antigua
-    # NUEVO DATASET: prefijos loc_ y obj_
     if ch_name.startswith("loc_"):
         return "location"
     if ch_name.startswith("obj_"):
         return "binary"
 
-    # Compatibilidad MARBLE/MHEALTH etc.
     if ch_name.startswith("env_") or ch_name.startswith("smartphone_"):
         return "binary"
     if ch_name.isupper() and "_" in ch_name:
@@ -518,14 +505,11 @@ def apply_fuzzy_segments(segments, sensor_cols, linguistic_scales):
 import pandas as pd
 import numpy as np
 
-# all_train_segments: lista de (T, F)
 all_train_data = np.stack(all_train_segments, axis=0)  # (N, T, F)
 N, T, F = all_train_data.shape
 
-# aplanamos N y T
 all_train_flat = all_train_data.reshape(N * T, F)      # (N*T, F)
 
-# ⚠️ usar nanmin / nanmax porque hay NaN en los datos
 mins = np.nanmin(all_train_flat, axis=0)
 maxs = np.nanmax(all_train_flat, axis=0)
 
@@ -563,7 +547,6 @@ for col in sensor_cols:
     ctype = ch2type.get(col, "other")
 
     if ctype in BINARY_TYPES:
-        # Binarios (rooms + env + smartphone) → L2 en [0,1]
         print(ctype, "IS ", BINARY_TYPES)
         vmin, vmax = 0.0, 1.0
         linguistic_scales[col] = build_trapezoidal_partition(
@@ -572,7 +555,6 @@ for col in sensor_cols:
             labels=labels_L2,
         )
     else:
-        # Continuos (imu, etc.) → L5 en [vmin, vmax] del train
         vmin = float(col_min_train[col])
         vmax = float(col_max_train[col])
         if vmax <= vmin:
@@ -582,19 +564,13 @@ for col in sensor_cols:
             vmin, vmax,
             L=5,
             labels=labels_L5,
-             plateau_ratio=0.6,   # más grande ⇒ meseta más ancha
-            overlap_ratio=0.3    # más grande ⇒ más cruce entre funciones            
+             plateau_ratio=0.6,   
+            overlap_ratio=0.3         
         )
 
     print(col, ctype, "→", linguistic_scales[col])
 
 
-
-# verificación rápida
-#print("Ventanas train:", len(all_train_segments),
-#      "| shape fuzzy[0]:", train_segments_fuzzy[0].shape if len(train_segments_fuzzy) else None)
-#print("Ventanas test:", len(all_test_segments),
-#      "| shape fuzzy[0]:", test_segments_fuzzy[0].shape if len(test_segments_fuzzy) else None)
 
 
 # ==== Cell 16 ====
@@ -635,13 +611,13 @@ for t in t_idx.astype(int):
     for p in temporal_scales:
         a, b, c, d = p["a"], p["b"], p["c"], p["d"]
         lbl = p["label"]
-        # calculamos μ(t) (array de 1 elemento → tomamos [0])
+
         row[lbl] = trapezoidal_membership_array(np.array([float(t)]), a, b, c, d)[0]
     rows.append(row)
 
 temporal_fuzzy_df = pd.DataFrame(rows).set_index("t")
 
-# Ejemplos de inspección
+
 print("Índice temporal (primeros 10):", temporal_fuzzy_df.index[:10].to_numpy())
 print("Parámetros de las escalas:")
 print(pd.DataFrame(temporal_scales))
@@ -654,20 +630,6 @@ def temporal_weighted_aggregate(
     fuzzy_feature_names,
     keep_3d=False
 ):
-    """
-    Agregación ponderada temporal de segmentos fuzzificados.
-
-    Args:
-        segments_fuzzy: lista de arrays (T, D)
-        temporal_fuzzy_df: DataFrame (T, L_temporal) con μ temporales
-        temporal_labels: nombres de escalas temporales (labels_T5)
-        fuzzy_feature_names: nombres base de D características difusas (sensor + label lingüístico)
-        keep_3d: si True => (N, L_temporal, D), si False => (N, L_temporal*D)
-
-    Returns:
-        agg_array: np.ndarray
-        out_feature_names: lista de nombres combinados (fuzzy + temporal)
-    """
     weights = [temporal_fuzzy_df[lbl].values.astype(float) for lbl in temporal_labels]
     T_ref = len(temporal_fuzzy_df)
     agg_list = []
@@ -710,7 +672,7 @@ def temporal_weighted_aggregate(
 
 
 # ==== Cell 19 ====
-# --- (1) Construcción de cuantificadores y membresía (tu versión) ---
+# --- (1) Construcción de cuantificadores 
 def build_fuzzy_quantifiers_from_points(
     points,
     labels=None,
@@ -755,7 +717,7 @@ def Q_trapezoidal_membership(x, a, b, c, d):
     mu[(x == b) | (x == c)] = 1.0
     return np.clip(mu, 0.0, 1.0)
 
-# --- (2) Aplicación a TODAS las features: expande D -> D*5 ---
+
 def apply_quantifiers_to_features(X, feature_names, quantifiers):
     """
     X: (N, D) en [0,1]
@@ -768,7 +730,7 @@ def apply_quantifiers_to_features(X, feature_names, quantifiers):
     N, D = X.shape
     Q = len(quantifiers)
 
-    # por seguridad, recorta a [0,1]
+
     X = np.clip(X, 0.0, 1.0)
 
     blocks = []
@@ -843,7 +805,7 @@ else:
 
 
 # --------------------------
-# (5) Comprobaciones
+# Comprobaciones
 # --------------------------
 
 
@@ -862,9 +824,9 @@ from sklearn.svm import LinearSVC
 
 
 # ============================================================
-# Construir índices automáticos de etiquetas (label → int)
+# Construir índices automáticos de etiquetas 
 # ============================================================
-# recolectamos todas las etiquetas únicas del train y test
+
 all_labels_text = sorted(set([lab["label"] for lab in all_train_labels] +
                              [lab["label"] for lab in all_test_labels]))
 
@@ -979,10 +941,7 @@ def _is_binary_type(tp: str) -> bool:
 
 
 def _is_wear_type(tp: str) -> bool:
-    """
-    Determina si un tipo de canal es wearable / continuo (IMU).
-    Soporta tipos del YAML (WEAR) y heurísticos (imu).
-    """
+
     if tp is None:
         return False
     tp_low = str(tp).lower()
@@ -1004,24 +963,7 @@ def extract_subwindow_features(
     extra_group_sizes=(2, 3),
     void_descriptions_out=None,  # ya no se usa, pero lo dejamos en la firma por compatibilidad
 ):
-    """
-    win_arr: np.array (T, F)
-    sensor_cols: lista de nombres de canales, len=F
-    channel_types: lista paralela a sensor_cols con el tipo de canal
-                   (p.ej. ['WEAR','WEAR','BINARY',...]).
-                   Si es None, se infiere con infer_channel_type().
-    n_parts: dividir el eje temporal en este nº de partes
-    extra_group_sizes: tamaños adicionales de grupos de partes
 
-    Devuelve:
-        feats_flat: vector 1D con todas las features
-        feat_names: lista de nombres en mismo orden
-
-    Estadísticas generadas por canal y por subventana/grupo:
-      - mean, std, min, max, void   (todas las columnas)
-      - last_value_bin, n_changes_bin   (solo para canales binarios; 0.0 resto)
-      - skewness_wear, kurtosis_wear    (solo para wearables; 0.0 resto)
-    """
     win_arr = np.asarray(win_arr, dtype=float)
     T, F = win_arr.shape
 
@@ -1035,7 +977,7 @@ def extract_subwindow_features(
 
     part_len = T // n_parts
 
-    # 1) segmentar ventana en partes básicas
+
     parts = []
     for p in range(n_parts):
         start = p * part_len
@@ -1046,24 +988,21 @@ def extract_subwindow_features(
     all_feats = []
     all_names = []
 
-    # stats base que ya tenías
+
     stats_names = ["mean", "desviation", "min", "max", "void"]
 
-    # -------------------------------------------------
-    # 2) features de cada parte por separado: p0, p1, ...
-    # -------------------------------------------------
+
     for p, seg in enumerate(parts):
-        # (5, F): median (mean), std, min, max, void
+
         stats_this_part = stats_from_segment_nanaware(seg)
 
-        # --- 2.1) estadísticas base (todas las columnas) ---
+
         for stat_name, stat_values in zip(stats_names, stats_this_part):
             all_feats.append(stat_values)  # (F,)
             for ch in sensor_cols:
                 all_names.append(f"#p{p}@{stat_name}@{ch}")
 
-        # --- 2.2) estadísticas específicas por tipo ---
-                # --- 2.2) estadísticas específicas por tipo (NO duplicar) ---
+
         last_vals = np.zeros(F, dtype=float)
         n_changes = np.zeros(F, dtype=float)
         skew_vals = np.zeros(F, dtype=float)
@@ -1093,7 +1032,7 @@ def extract_subwindow_features(
                     skew_vals[j] = 0.0
                     kurt_vals[j] = 0.0
 
-        # ✅ añadir UNA vez por parte (vectores tamaño F)
+
         all_feats.append(last_vals)
         all_names.extend([f"#p{p}@last value@{ch}" for ch in sensor_cols])
 
@@ -1108,8 +1047,7 @@ def extract_subwindow_features(
 
 
     # -------------------------------------------------
-    # 3) features de grupos deslizantes de tamaño 2..n
-    # -------------------------------------------------
+    # features de grupos 
     for g in extra_group_sizes:
         if g <= 1 or g > n_parts:
             continue
@@ -1160,7 +1098,7 @@ def extract_subwindow_features(
                         skew_vals[j] = 0.0
                         kurt_vals[j] = 0.0
 
-            # ✅ añadir UNA vez por grupo (vectores tamaño F)
+            
             all_feats.append(last_vals)
             all_names.extend([f"#{group_label}@last value@{ch}" for ch in sensor_cols])
 
@@ -1413,10 +1351,10 @@ svm_proba_test  = np.vstack([margin_to_proba(m) for m in svm_margin_test])
 
     
 # =========================
-# Entrenamiento con ExtraTrees (bosque interpretativo)
+# Entrenamiento con ExtraTrees 
 # =========================
 clf = ExtraTreesClassifier(
-    n_estimators=20,         # nº de árboles (más = más potencia)
+    n_estimators=20,         # nº de árboles 
     criterion="entropy",     # como C4.5
     max_depth=10,            # controla interpretabilidad
     min_samples_split=10,
@@ -1493,7 +1431,7 @@ xgb = XGBClassifier(
     n_jobs=-1
 )
 
-# Entrenamiento (sin early stopping para máxima compatibilidad)
+# Entrenamiento 
 xgb.fit(X_train, y_train, eval_set=[(X_train, y_train), (X_test, y_test)], verbose=False, sample_weight=weights)
 
 
@@ -1545,20 +1483,13 @@ for fkey, gain in raw_importances.items():
 
 
 def enrich_df_gain(df_gain: pd.DataFrame, feature_names: list[str]) -> pd.DataFrame:
-    """
-    Añade a df_gain:
-      - feat_idx
-      - feat_name
-      - ftype: 'logic' / 'stats' / 'other'
-      - sensor
-      - sensor_type: 'location' / 'imu' / 'binary' / None
-    """
+
     df = deepcopy(df_gain).reset_index(drop=True)
 
-    # fXXXX -> índice de feature
+
     df["feat_idx"] = df["xgb_feature"].str.extract(r"f(\d+)").astype(int)
 
-    # nombre legible
+
     df["feat_name"] = df["feat_idx"].apply(lambda i: feature_names[i])
 
     # tipo de feature por prefijo
@@ -1659,19 +1590,7 @@ def pick_label_from_proba(proba_row, train_mode, rng):
 
 
 def pick_stats_random_weighted(df_stats, row_vals, alpha=2.0):
-    """
-    Selecciona una feature estadística de forma aleatoria ponderada por:
-        score = (gain * |valor|)^alpha
 
-    df_stats: subset de df_gain_enriched ya filtrado por:
-              - sensor concreto
-              - ftype == 'stats'
-    row_vals: vector (n_features,) con los valores del sample
-    alpha:    >1 afila (más cerca del top), =1 proporcional, <1 más exploración
-
-    Devuelve:
-        (feat_name, value) o None si df_stats está vacío
-    """
     if df_stats.empty:
         return None
 
@@ -1755,19 +1674,11 @@ def sensor_all_minus_one_raw(raw_window, raw_channels, sensor):
     return np.all(vals == 0.0)
 
 def format_logic_feature(feat_name: str, value: float) -> str:
-    """
-    Limpia feat_name eliminando corchetes y pasando todo a minúsculas.
-    Ejemplo entrada:
-      "[None] loc_toileting [is Low] [toward the end]"
-    Salida:
-      "none loc_toileting is low toward the end (1.00)"
-    """
+
     try:
-        # quitamos corchetes
         cleaned = feat_name.replace("[", "").replace("]", "")
-        # pasamos todo a minúsculas
         cleaned = cleaned.lower().strip()
-        # formateamos
+
         return f"{cleaned} ({value:.2f})"
     except Exception:
         return f"{feat_name} ({value:.2f})"
@@ -1780,13 +1691,7 @@ def pick_best_for_sensor(
     use_membership_for_logic: bool = True,
     alpha_stats: float = 2.0,
 ):
-    """
-    Devuelve texto formateado (o None) para un sensor dado y un modo.
 
-    - mode == "logic": elige la feature lógica con mayor score = gain * membership (si se pide)
-    - mode == "stats": elige una feature estadística de forma aleatoria ponderada
-                       por (gain * |valor|)^alpha_stats
-    """
     assert mode in ("logic", "stats")
 
     # subset de features para ese sensor y modo
@@ -1847,13 +1752,7 @@ def pick_best_for_sensor_k(
     use_membership_for_logic: bool = True,
     alpha_stats: float = 2.0,
 ):
-    """
-    Igual que pick_best_for_sensor, pero devuelve las K mejores features.
 
-    Retorna:
-        - lista de textos formateados (longitud K o menos si no hay tantas)
-        - [] si no hay features disponibles
-    """
     assert mode in ("logic", "stats")
     if top_k <= 0:
         return []
@@ -1951,7 +1850,7 @@ def toon_record_for_sample(
     B = {}
 
 
-    # LOCATION
+    # WEAR
     for s in WEAR_SENSORS:
 
         if sensor_all_minus_one_raw(raw_window, raw_channels, s):
@@ -2012,7 +1911,7 @@ def build_and_save_toon_descriptions(
     df_gain: pd.DataFrame,
     out_path: str | Path,
     raw_records,
-    split: str,   # 👈 AÑADIDO
+    split: str,
     use_membership_for_logic: bool = True,
     svm_proba: np.ndarray | None = None,
     xgb_proba: np.ndarray | None = None,
@@ -2043,7 +1942,7 @@ def build_and_save_toon_descriptions(
             )
 
             # -----------------------------
-            # 👇 EXPERTS + RAG DESCRIPTION
+            # EXPERTS + RAG DESCRIPTION
             # -----------------------------
             if (svm_proba is not None) and (xgb_proba is not None) and (id2label is not None):
                 svm_c, svm_s = pick_label_from_proba(
@@ -2114,7 +2013,7 @@ import json
 from pathlib import Path
 
 def pack_logic_to_u8(X_logic: np.ndarray, step: float) -> np.ndarray:
-    # X_logic en [0,1] (ya cuantizado). step>0
+
     X = np.asarray(X_logic, dtype=np.float32)
     X = np.clip(X, 0.0, 1.0)
     q = np.rint(X / float(step)).astype(np.int32)
@@ -2346,8 +2245,7 @@ def prune_by_gain_enriched_keep50(
             keepL = _topk_local_by_gain(df_ch_logic, "local_logic", kL_bin)
         keepS = _topk_local_by_gain(df_ch_stats, "local_stats", kS)
 
-        # fallback suave: si por lo que sea no hay suficientes, rellenamos con los primeros índices
-        # (así nunca dejas el canal vacío)
+
         if tpU == "WEAR":
             if len(keepL) < kL_wear:
                 fill = [i for i in range(dL_wear) if i not in set(keepL)]
@@ -2411,7 +2309,7 @@ X_wear_test_red, X_bin_test_red, _, _, _ = prune_by_gain_enriched_keep50(
     keep_ratio=0.8,
 )
 
-# Sustituye los tensores originales por los reducidos (los que se guardan)
+# Sustituimos los tensores originales por los reducidos (los que se guardan)
 X_wear_train = X_wear_train_red
 X_wear_test  = X_wear_test_red
 X_bin_train  = X_bin_train_red
