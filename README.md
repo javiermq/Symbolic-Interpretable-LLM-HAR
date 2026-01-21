@@ -1,11 +1,11 @@
-# 🧠 Symbolic + Interpretable + LLM for Human Activity Recognition
+# 🧠 Symbolic + Interpretable + Models for Human Activity Recognition
 
 This repository presents a **comparative and unified framework for Human Activity Recognition (HAR)** that combines:
 
 * **Raw sensor-based models** (KNN, Linear SVM, LSTM, CNN)
 * **Symbolic and statistical interpretable features** (fuzzy logic + statistics)
 * **Classical interpretable ML models** (C4.5 decision trees, Linear SVM, XGBoost)
-* **Tiny / Sensor-oriented Large Language Models (LLMs)** for reasoning and natural-language interaction over sensor data
+* **Tiny / Sensor-oriented Large Language Models (LLMs)** for reasoning and semantic interaction over sensor data
 
 The goal of the project is to **systematically study the trade-off between performance and interpretability** in HAR, while enabling **symbolic explanations and LLM-based reasoning** grounded on sensor signals.
 
